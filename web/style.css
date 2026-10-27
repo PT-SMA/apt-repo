@@ -76,6 +76,12 @@ h2 { font-size: 1.1rem; margin: 2rem 0 .75rem; }
 .topbar nav a:hover { background: var(--hover); color: var(--text); text-decoration: none; }
 .topbar nav a.active { background: var(--hover); color: var(--text); font-weight: 600; }
 .topbar-right { margin-left: auto; display: flex; align-items: center; gap: 1rem; }
+body.logged-out .topbar nav, body.logged-out .topbar-right { display: none; }
+
+.login { max-width: 22rem; margin: 4rem auto; }
+.login-error { color: var(--danger); margin: 0 0 .85rem; }
+.login-error:empty { display: none; }
+.login button { width: 100%; }
 
 main { max-width: 1200px; margin: 0 auto; padding: 1.5rem; }
 
@@ -181,7 +187,7 @@ button.danger.solid, dialog button.danger { background: var(--danger); border-co
 button.small { padding: .2rem .55rem; font-size: .85rem; }
 button.link { border: 0; background: none; padding: 0 .25rem; color: var(--muted); font-size: 1.1rem; line-height: 1; }
 
-input[type=text], input[type=search], input[type=number], select {
+input[type=text], input[type=password], input[type=search], input[type=number], select {
   font: inherit;
   padding: .45rem .6rem;
   border: 1px solid var(--border);

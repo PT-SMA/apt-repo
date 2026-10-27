@@ -4,7 +4,7 @@ A self-hosted, GPG-signed Debian APT repository in one container, with a web UI 
 
 - **[aptly](https://www.aptly.info/)** stores packages, signs and publishes the repository, and provides a REST API.
 - **nginx** serves the published repository at `/`, the management UI at `/ui/`, and the aptly API at `/api/`.
-  Basic auth protects the UI and the API.
+  Basic auth protects the API. The UI has its own sign-in form and passes the login on to the API.
 - **Web UI** is a small dependency-free page. It can:
   - upload `.deb`s by drag and drop
   - search, sort, inspect and remove packages
@@ -30,7 +30,7 @@ docker run -d --name apt-repo -p 8080:80 \
 
 Or use `docker compose up -d` (also works with `podman compose`). Then:
 
-- UI: <http://localhost:8080/ui/>. Log in as `admin` with your `ADMIN_PASSWORD`.
+- UI: <http://localhost:8080/ui/>. Sign in as `admin` with your `ADMIN_PASSWORD`.
 - Repository: <http://localhost:8080/>
 - Public key: <http://localhost:8080/repo.gpg>
 

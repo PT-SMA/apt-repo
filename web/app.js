@@ -2,8 +2,9 @@
 
 /*
  * Management UI for the aptly-backed APT repository.
- * Talks to the aptly REST API through nginx at ../api/ (same origin and same
- * basic-auth realm as this page, so the browser reuses the login).
+ * Talks to the aptly REST API through nginx at ../api/, which requires the admin
+ * login. The page asks for it with its own form and sends it as a basic-auth
+ * header, so it never depends on the browser's login dialog.
  */
 
 const API_BASE = new URL('../api/', location.href);
@@ -48,13 +49,44 @@ function errorMessage(data, fallback) {
   return fallback;
 }
 
+// "Basic …" header for the admin login, kept for this tab only.
+let authHeader = '';
+try { authHeader = sessionStorage.getItem('auth') || ''; } catch { /* storage unavailable */ }
+
+function setAuth(value) {
+  authHeader = value;
+  try {
+    if (value) sessionStorage.setItem('auth', value);
+    else sessionStorage.removeItem('auth');
+  } catch { /* storage unavailable */ }
+}
+
+function basicAuth(user, password) {
+  const bytes = new TextEncoder().encode(`${user}:${password}`);
+  return `Basic ${btoa(String.fromCharCode(...bytes))}`;
+}
+
+// Same-origin fetch with our own Authorization header. credentials: 'omit' keeps the
+// browser from adding a login it cached and from popping up its own dialog on a 401.
+function authFetch(url, init = {}, auth = authHeader) {
+  const headers = { ...init.headers };
+  if (auth) headers.Authorization = auth;
+  return fetch(url, { ...init, headers, credentials: 'omit' });
+}
+
+function sessionExpired() {
+  showLogin('Your login is no longer valid. Please sign in again.');
+  return new Error('Not signed in');
+}
+
 async function api(method, path, body) {
   const init = { method, headers: { Accept: 'application/json' } };
   if (body !== undefined) {
     init.headers['Content-Type'] = 'application/json';
     init.body = JSON.stringify(body);
   }
-  const res = await fetch(new URL(path, API_BASE), init);
+  const res = await authFetch(new URL(path, API_BASE), init);
+  if (res.status === 401) throw sessionExpired();
   const data = parseJSON(await res.text());
   if (!res.ok) throw new Error(errorMessage(data, `${res.status} ${res.statusText}`));
   return data;
@@ -67,8 +99,10 @@ function uploadFiles(dir, files, onProgress) {
     for (const f of files) form.append('file', f, f.name);
     const xhr = new XMLHttpRequest();
     xhr.open('POST', new URL(`files/${enc(dir)}`, API_BASE));
+    xhr.setRequestHeader('Authorization', authHeader);
     xhr.upload.onprogress = e => { if (e.lengthComputable) onProgress(e.loaded / e.total); };
     xhr.onload = () => {
+      if (xhr.status === 401) return reject(sessionExpired());
       const data = parseJSON(xhr.responseText);
       if (xhr.status >= 200 && xhr.status < 300) resolve(data);
       else reject(new Error(errorMessage(data, `Upload failed (${xhr.status})`)));
@@ -875,6 +909,63 @@ async function viewSetup() {
         `     -d '{"Signing":{"Batch":true}}' ${root}/api/publish/:./DISTRIBUTION`)));
 }
 
+// ------------------------------------------------------------------ login
+
+function showLogin(message) {
+  setAuth('');
+  routeToken++; // drop pages that are still loading
+  document.body.classList.add('logged-out');
+  const field = (label, attrs) => {
+    const input = h('input', { placeholder: ' ', required: true, spellcheck: 'false', ...attrs });
+    return [input, h('label', { class: 'field' }, h('span', {}, label), input)];
+  };
+  const [user, userField] = field('Username', { type: 'text', name: 'username', autocomplete: 'username' });
+  const [password, passwordField] = field('Password', { type: 'password', name: 'password', autocomplete: 'current-password' });
+  const error = h('p', { class: 'login-error', role: 'alert' }, message || '');
+  const submit = h('button', { type: 'submit', class: 'primary' }, 'Sign in');
+
+  const form = h('form', {
+    class: 'panel login',
+    onsubmit: async e => {
+      e.preventDefault();
+      submit.disabled = true;
+      error.textContent = '';
+      try {
+        const auth = basicAuth(user.value, password.value);
+        const res = await authFetch(new URL('version', API_BASE), {}, auth);
+        if (res.status === 401) throw new Error('Wrong username or password.');
+        if (!res.ok) throw new Error(`Could not reach the API (${res.status} ${res.statusText}).`);
+        setAuth(auth);
+        start();
+      } catch (err) {
+        error.textContent = err.message;
+        password.select();
+      } finally {
+        submit.disabled = false;
+      }
+    },
+  }, h('h2', {}, 'Sign in'), userField, passwordField, error, submit);
+
+  app.replaceChildren(form);
+  user.focus();
+}
+
+// Loads what every page needs once signed in, then shows the current page.
+async function start() {
+  document.body.classList.remove('logged-out');
+  app.replaceChildren();
+  try {
+    const res = await authFetch('info.json', { cache: 'no-store' });
+    if (res.ok) info = { ...info, ...await res.json() };
+  } catch { /* keep defaults */ }
+
+  api('GET', 'version')
+    .then(v => { document.getElementById('version').textContent = `aptly ${String(v.Version).trim()}`; })
+    .catch(() => {});
+
+  route();
+}
+
 // ------------------------------------------------------------------ router
 
 const routes = [
@@ -888,6 +979,7 @@ const routes = [
 let routeToken = 0;
 
 async function route() {
+  if (!authHeader) return showLogin();
   const hash = location.hash || '#/';
   const token = ++routeToken;
   for (const [pattern, view, nav] of routes) {
@@ -908,22 +1000,16 @@ async function route() {
   location.hash = '#/';
 }
 
-async function init() {
-  try {
-    const res = await fetch('info.json', { cache: 'no-store' });
-    if (res.ok) info = { ...info, ...await res.json() };
-  } catch { /* keep defaults */ }
-
+function init() {
   const auto = document.getElementById('auto-publish');
   auto.checked = settings.autoPublish;
   auto.addEventListener('change', () => { settings.autoPublish = auto.checked; });
 
-  api('GET', 'version')
-    .then(v => { document.getElementById('version').textContent = `aptly ${String(v.Version).trim()}`; })
-    .catch(() => {});
+  document.getElementById('logout').addEventListener('click', () => showLogin());
 
   window.addEventListener('hashchange', route);
-  route();
+  if (authHeader) start();
+  else showLogin();
 }
 
 init();
