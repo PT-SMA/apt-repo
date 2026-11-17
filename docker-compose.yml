@@ -3,6 +3,8 @@ services:
     build: .
     image: apt-repo:latest
     restart: unless-stopped
+    # Give aptly time to finish a publish and close its database before it is killed.
+    stop_grace_period: 1m
     ports:
       - "8080:80"
     environment:
