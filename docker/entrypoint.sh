@@ -110,6 +110,21 @@ cat >"$UI_DIR/info.json" <<EOF
 }
 EOF
 
+# --- database ----------------------------------------------------------------------
+# A process killed while opening leveldb can leave an empty MANIFEST ("manifest corrupted").
+# aptly can rebuild it from the table files, so do that (after a backup) instead of crash-looping.
+DB_DIR=$DATA_DIR/aptly/db
+if [[ -d $DB_DIR ]] && ! db_err=$(aptly_cli repo list -raw 2>&1 >/dev/null); then
+  [[ $db_err == *corrupt* ]] || die "cannot open the aptly database: $db_err"
+  db_backup=$DATA_DIR/db-backup-$(date -u +%Y%m%dT%H%M%SZ)
+  log "aptly database is corrupted: $db_err"
+  log "Backing it up to $db_backup and running 'aptly db recover'"
+  as_aptly cp -a "$DB_DIR" "$db_backup"
+  aptly_cli db recover || die "aptly db recover failed; the original database is in $db_backup"
+  aptly_cli repo list -raw >/dev/null || die "database still unreadable after recovery; backup in $db_backup"
+  log "Database recovered (backup kept in $db_backup; delete it once everything looks right)"
+fi
+
 # --- repositories ----------------------------------------------------------------
 # Done with the CLI before the API starts, so nothing else holds the database.
 IFS=', ' read -r -a DISTS <<<"$REPO_DISTRIBUTIONS"

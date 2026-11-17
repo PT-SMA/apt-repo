@@ -20,8 +20,12 @@ COPY web/ /usr/share/apt-ui/
 VOLUME /data
 EXPOSE 80
 
+# The aptly API runs with -no-lock, so every request opens and closes the database.
+# Only probe that its port is open; calling it every 30s churns the leveldb MANIFEST.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=2m \
-  CMD curl -fsS http://127.0.0.1:8080/api/version >/dev/null \
+  CMD bash -c '</dev/tcp/127.0.0.1/8080' \
    && curl -fsS http://127.0.0.1/healthz >/dev/null || exit 1
 
-ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/entrypoint.sh"]
+# -g: forward stop signals to the whole process group, so an aptly CLI run during startup
+# closes the database cleanly instead of being killed mid-write.
+ENTRYPOINT ["/usr/bin/tini", "-g", "--", "/usr/local/bin/entrypoint.sh"]

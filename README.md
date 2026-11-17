@@ -21,7 +21,7 @@ Everything persists in a single `/data` volume (aptly database, package pool, pu
 
 ```sh
 docker build -t apt-repo .            # podman: podman build --format docker -t apt-repo .
-docker run -d --name apt-repo -p 8080:80 \
+docker run -d --name apt-repo -p 8080:80 --stop-timeout 60 \
   -e ADMIN_PASSWORD=change-me \
   -e REPO_DISTRIBUTIONS="trixie bookworm" \
   -v apt-data:/data \
@@ -113,7 +113,15 @@ curl -u admin:PW -X PUT -H 'Content-Type: application/json' -d '{"Signing":{"Bat
 - **Disk space:** removing packages doesn't delete their files right away. Run **Clean up storage**
   in the UI (`POST /api/db/cleanup`) to delete files that no repository or snapshot references.
 - **Health:** the image has a `HEALTHCHECK` (podman needs `--format docker` at build time to keep it).
-  nginx also answers `GET /healthz`.
+  nginx also answers `GET /healthz`. The check only probes that the aptly API port is open: because
+  of `-no-lock`, every API call opens and closes the database, so don't poll the API for liveness.
+- **Corrupted database:** if aptly reports `leveldb: ... corrupted` (for example after the
+  container or host was killed), the container copies `/data/aptly/db` to `/data/db-backup-<time>`
+  and runs `aptly db recover` on startup. This rebuilds the database index from its table files.
+  Delete the backup once everything looks right. To run it by hand, stop the container first:
+  `docker run --rm --entrypoint bash -v apt-data:/data apt-repo -c 'sed "s|__ARCHITECTURES__|[]|" /etc/aptly.conf.tmpl >/tmp/a.conf && setpriv --reuid=aptly --regid=aptly --init-groups -- aptly -config=/tmp/a.conf db recover'`.
+  Stop the container with enough grace time (`stop_grace_period: 1m` in the compose file) so aptly
+  is never killed in the middle of a publish.
 
 ## Recommendations for managing your packages
 
